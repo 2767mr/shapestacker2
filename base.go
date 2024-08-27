@@ -2,9 +2,9 @@ package main
 
 import "math/bits"
 
-type shape uint32
+type Shape uint32
 
-func (s shape) String() string {
+func (s Shape) String() string {
 	var result string
 
 	result += s.cornerAt(position_Layer0_Top_Right).String()
@@ -45,8 +45,8 @@ func (s shape) String() string {
 	return result
 }
 
-func shapeFrom(s string) shape {
-	var result shape
+func shapeFrom(s string) Shape {
+	var result Shape
 
 	index := position(0)
 	odd := true
@@ -128,12 +128,12 @@ const (
 	cornerTypeCrystal
 )
 
-func (s shape) cornerAt(index position) cornerType {
+func (s Shape) cornerAt(index position) cornerType {
 	return cornerType(((s >> index) & 1) | ((s >> (index + 15)) & 0b10))
 }
 
-func (s shape) setCornerAt(index position, value cornerType) shape {
-	return s&^(0b1<<index)&^(1<<(index+16)) | shape(value&1)<<index | shape(value&0b10)<<(index+15)
+func (s Shape) setCornerAt(index position, value cornerType) Shape {
+	return s&^(0b1<<index)&^(1<<(index+16)) | Shape(value&1)<<index | Shape(value&0b10)<<(index+15)
 }
 
 func (p cornerType) isEmpty() bool {
@@ -165,23 +165,23 @@ func (p cornerType) String() string {
 }
 
 // toFilled shape converts all pins and crystals into filled corners
-func (s shape) toFilled() shape {
+func (s Shape) toFilled() Shape {
 	return s&0b1111_1111_1111_1111 | (s >> 16)
 }
 
-func (s shape) layerCount() int {
+func (s Shape) layerCount() int {
 	return 4 - bits.LeadingZeros16(uint16(s.toFilled()))/4
 }
 
-func (s shape) rotate() shape {
+func (s Shape) rotate() Shape {
 	return (s&0b1110_1110_1110_1110_1110_1110_1110_1110)>>1 | (s&0b0001_0001_0001_0001_0001_0001_0001_0001)<<3
 }
 
-func (s shape) hasCrystal() bool {
+func (s Shape) hasCrystal() bool {
 	return (s>>16)&s != 0
 }
 
-func (s shape) destoryCrystalAt(index position) shape {
+func (s Shape) destoryCrystalAt(index position) Shape {
 	if !s.cornerAt(index).isCrystal() {
 		return s
 	}
@@ -200,7 +200,7 @@ func (s shape) destoryCrystalAt(index position) shape {
 	return result
 }
 
-func (s shape) collapse() shape {
+func (s Shape) collapse() Shape {
 	supported := s.supported()
 	if supported == s {
 		return s
@@ -231,8 +231,8 @@ func (s shape) collapse() shape {
 	return result
 }
 
-func (s shape) supported() shape {
-	var supported shape
+func (s Shape) supported() Shape {
+	var supported Shape
 	newSupported := s & 0b1111_0000_0000_0000_1111
 
 	for newSupported != supported {
@@ -247,7 +247,7 @@ func (s shape) supported() shape {
 	return supported
 }
 
-func (s shape) isSupported(position position, supported shape) bool {
+func (s Shape) isSupported(position position, supported Shape) bool {
 	if s.cornerAt(position).isEmpty() {
 		return false
 	}
@@ -279,7 +279,7 @@ func (s shape) isSupported(position position, supported shape) bool {
 	return false
 }
 
-func (s shape) pushPins() shape {
+func (s Shape) pushPins() Shape {
 	pins := s.toFilled() & 0b1111
 
 	for i := position(12); i < 16; i++ {
@@ -295,7 +295,7 @@ func (s shape) pushPins() shape {
 	return s.collapse()
 }
 
-func (s shape) right() shape {
+func (s Shape) right() Shape {
 	for i := position(0); i < 4; i++ {
 		if s.cornerAt(position_Layer0_Top_Right+i*4).isCrystal() && s.cornerAt(position_Layer0_Top_Left+i*4).isCrystal() {
 			s = s.destoryCrystalAt(position_Layer0_Top_Right + i*4)
@@ -359,7 +359,7 @@ func (s shape) right() shape {
 	}
 
 	//Take right side and collapse
-	result := shape(0)
+	result := Shape(0)
 	layer := (s >> 0) & 0b1100_0000_0000_0000_1100
 	if (layer>>16)&^layer != 0 {
 		//Has pins
@@ -403,17 +403,17 @@ func (s shape) right() shape {
 	return result
 }
 
-func (s shape) combine(with shape) shape {
+func (s Shape) combine(with Shape) Shape {
 	return s | with
 }
 
 //stack other shape on top of s
-func (s shape) stack(other shape) shape {
+func (s Shape) stack(other Shape) Shape {
 	for i := position(0); i < 16; i++ {
 		other = other.destoryCrystalAt(i)
 	}
 
-	mask := shape(0)
+	mask := Shape(0)
 	for other != 0 {
 		group := other.firstGroup()
 		other = other &^ group
@@ -447,7 +447,7 @@ func (s shape) stack(other shape) shape {
 
 //unsafeStack other shape on top of s
 //The other shape must only be a single group at the bottom layer without crystals
-func (s shape) unsafeStack(other shape) shape {
+func (s Shape) unsafeStack(other Shape) Shape {
 	filledS := s.toFilled()
 	filledOther := other.toFilled()
 
@@ -467,7 +467,7 @@ func (s shape) unsafeStack(other shape) shape {
 	return s | other
 }
 
-func (s shape) firstGroup() shape {
+func (s Shape) firstGroup() Shape {
 	for i := position(0); i < 16; i++ {
 		if !s.cornerAt(i).isEmpty() {
 			group := s.connectedGroup(i, 0)
@@ -483,7 +483,7 @@ func (s shape) firstGroup() shape {
 	return 0
 }
 
-func (s shape) connectedGroup(position position, group shape) shape {
+func (s Shape) connectedGroup(position position, group Shape) Shape {
 	if s.cornerAt(position).isEmpty() {
 		return group
 	}
@@ -507,7 +507,7 @@ func (s shape) connectedGroup(position position, group shape) shape {
 	return group
 }
 
-func (s shape) crystalGenerator() shape {
+func (s Shape) crystalGenerator() Shape {
 	layers := s.layerCount()
 	for i := position(0); i < position(layers*4); i++ {
 		if s.cornerAt(i).isEmpty() || s.cornerAt(i).isPin() {

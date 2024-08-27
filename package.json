@@ -1,0 +1,9 @@
+{
+    "name": "shapez2-solver",
+    "version": "1.0.0",
+    "description": "Solver for the game shapez2",
+    "devDependencies": {
+        "esbuild": "^0.23.1",
+        "typescript": "^5.5.4"
+    }
+}

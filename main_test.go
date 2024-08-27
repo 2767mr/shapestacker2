@@ -6,9 +6,9 @@ import (
 
 type TestCase struct {
 	name      string
-	input     shape
-	input2    shape
-	expect    shape
+	input     Shape
+	input2    Shape
+	expect    Shape
 	operation func(*testing.T, TestCase)
 }
 
