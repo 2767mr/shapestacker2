@@ -16,30 +16,33 @@ var (
 	possibleList      []shape
 	possibleLeftList  []shape
 	possibleRightList []shape
+	possibleRecipes   []recipe
 
-	additions  = make([][]shape, 8)
+	additions  = make([][]recipe, 8)
 	stackables = []shape{}
 
 	changed = true
 )
 
-func addPossible(s shape) {
+func addPossible(s shape, source shape) {
 	if _, ok := possible[s]; !ok {
-		addPossibleNoCheck(s)
+		possible[s] = struct{}{}
+		possibleList = append(possibleList, s)
+		possibleRecipes = append(possibleRecipes, recipe{s, source})
+		changed = true
+
+		if s&0b1100_1100_1100_1100_1100_1100_1100_1100 == 0 {
+			possibleLeftList = append(possibleLeftList, s)
+		}
+		if s&^0b1100_1100_1100_1100_1100_1100_1100_1100 == 0 {
+			possibleRightList = append(possibleRightList, s)
+		}
 	}
 }
 
-func addPossibleNoCheck(s shape) {
-	possible[s] = struct{}{}
-	possibleList = append(possibleList, s)
-	changed = true
-
-	if s&0b1100_1100_1100_1100_1100_1100_1100_1100 == 0 {
-		possibleLeftList = append(possibleLeftList, s)
-	}
-	if s&^0b1100_1100_1100_1100_1100_1100_1100_1100 == 0 {
-		possibleRightList = append(possibleRightList, s)
-	}
+type recipe struct {
+	shape    shape
+	original shape
 }
 
 func main() {
@@ -49,7 +52,44 @@ func main() {
 		readPossibleShapes()
 	}
 
-	fmt.Println("Possible shapes:", len(possibleList))
+	fmt.Println("Possible shapes:", len(possibleList), len(possibleRecipes))
+	for i := range possibleList {
+		if possibleList[i] != possibleRecipes[i].shape {
+			fmt.Println("Mismatch:", possibleList[i], possibleRecipes[i].shape)
+		}
+	}
+
+	// x := readFromFatcatX()
+	// fmt.Println("Possible shapes (fatcatx):", len(x))
+
+	// slices.Sort(x)
+
+	// count := 0
+	// for _, s := range possibleList {
+	// 	count++
+	// 	if _, ok := slices.BinarySearch(x, s); !ok {
+	// 		r, _ := slices.BinarySearchFunc(possibleRecipes, s, func(a recipe, b shape) int {
+	// 			return int(a.shape) - int(b)
+	// 		})
+	// 		fmt.Println("Missing:", s, possibleRecipes[r].original)
+	// 	}
+	// }
+	// fmt.Println("Count:", count)
+
+	printRecipe(shapeFrom("----CuCu:----Cu--:----P-cu:----Cucu"))
+	fmt.Println("---")
+	printRecipe(shapeFrom("CuCu----:--P-----:cuCu----:cu------"))
+	fmt.Println("---")
+	printRecipe(shapeFrom("cuCu----:CuP-----:cuCu----:cu------"))
+
+	// base := shapeFrom("----CuP-:CuCucuP-")
+	// for _, s := range possibleList {
+	// 	if s&0b1111_1111_0000_0000_1111_1111 == base {
+	// 		fmt.Println(s)
+	// 	}
+	// }
+
+	// fmt.Println(shapeFrom("P-------:Rg------:cbRb--Rb").isPossible())
 
 	// slices.Sort(possibleList)
 	// fmt.Println("Sorted possible shapes:", len(possibleList))
@@ -96,6 +136,70 @@ func main() {
 	// findAllPossibleShapes()
 }
 
+func printRecipe(s shape) {
+	stackables = []shape{
+		shapeFrom("P-------"),
+		shapeFrom("--P-----"),
+		shapeFrom("----P---"),
+		shapeFrom("------P-"),
+		shapeFrom("Cu------"),
+		shapeFrom("--Cu----"),
+		shapeFrom("----Cu--"),
+		shapeFrom("------Cu"),
+		shapeFrom("CuCu----"),
+		shapeFrom("--CuCu--"),
+		shapeFrom("----CuCu"),
+		shapeFrom("Cu----Cu"),
+		shapeFrom("CuCuCu--"),
+		shapeFrom("--CuCuCu"),
+		shapeFrom("Cu--CuCu"),
+		shapeFrom("CuCu--Cu"),
+		shapeFrom("CuCuCuCu"),
+	}
+
+	visited := make(map[shape]struct{})
+	var ok bool
+	for ; !ok && s != 0; _, ok = visited[s] {
+		visited[s] = struct{}{}
+		i, _ := slices.BinarySearchFunc(possibleRecipes, s, func(a recipe, b shape) int {
+			return int(a.shape) - int(b)
+		})
+
+		r := possibleRecipes[i]
+
+		op := "unknown"
+		if r.original.rotate() == s {
+			op = "rotate"
+		} else if r.original.rotate().rotate() == s {
+			op = "rotate2"
+		} else if r.original.pushPins() == s {
+			op = "pushPins"
+		} else if r.original.right() == s {
+			op = "right"
+		} else if r.original.crystalGenerator() == s {
+			op = "crystalGenerator"
+		} else {
+			for _, stackable := range stackables {
+				if r.original.stack(stackable) == s {
+					op = "stack " + stackable.String()
+					break
+				}
+			}
+
+			if op == "unknown" {
+				if r.original&0b1100_1100_1100_1100_1100_1100_1100_1100 == 0 && (s & 0b1100_1100_1100_1100_1100_1100_1100_1100).isPossible() && (s&0b1100_1100_1100_1100_1100_1100_1100_1100) != 0 {
+					op = "combine " + (s & 0b1100_1100_1100_1100_1100_1100_1100_1100).String()
+				} else if r.original&^0b1100_1100_1100_1100_1100_1100_1100_1100 == 0 && (s &^ 0b1100_1100_1100_1100_1100_1100_1100_1100).isPossible() && (s&^0b1100_1100_1100_1100_1100_1100_1100_1100) != 0 {
+					op = "combine " + (s &^ 0b1100_1100_1100_1100_1100_1100_1100_1100).String()
+				}
+			}
+		}
+
+		fmt.Println("Recipe:", s, "<-", r.original, op)
+		s = r.original
+	}
+}
+
 func (s shape) isPossible() bool {
 	_, ok := slices.BinarySearch(possibleList, s)
 	return ok
@@ -120,9 +224,19 @@ func readPossibleShapes() {
 	var buffer bytes.Buffer
 	io.Copy(&buffer, file)
 
-	bytes := buffer.Bytes()
-	possibleList = *(*[]shape)(unsafe.Pointer(&bytes))
-	possibleList = possibleList[: len(bytes)/4 : len(bytes)/4]
+	bbytes := buffer.Bytes()
+	possibleList = *(*[]shape)(unsafe.Pointer(&bbytes))
+	possibleList = possibleList[: len(bbytes)/4 : len(bbytes)/4]
+
+	file2, _ := os.Open("possible-sorted-recipe.bin")
+	defer file2.Close()
+
+	var buffer2 bytes.Buffer
+	io.Copy(&buffer2, file2)
+
+	bytes2 := buffer2.Bytes()
+	possibleRecipes = *(*[]recipe)(unsafe.Pointer(&bytes2))
+	possibleRecipes = possibleRecipes[: len(bytes2)/8 : len(bytes2)/8]
 
 	// var b [4]byte
 	// for {
@@ -138,34 +252,55 @@ func readPossibleShapes() {
 
 func findAllPossibleShapes() {
 	for i := range additions {
-		additions[i] = make([]shape, 0, 400_000_000)
+		additions[i] = make([]recipe, 0, 400_000_000)
 	}
 
 	// fmt.Println(shapeFrom("cu------:cu------").pushPins().pushPins().pushPins())
 
-	addPossible(shapeFrom("Cu------"))
-	addPossible(shapeFrom("P-------"))
-
-	for changed {
-		changed = false
-		for _, shape := range possibleList {
-			addPossible(shape.rotate())
-			addPossible(shape.pushPins())
-			addPossible(shape.right())
-		}
-
-		for _, a := range possibleLeftList {
-			for _, b := range possibleRightList {
-				addPossible(a.combine(b))
-			}
-		}
+	stackables = []shape{
+		shapeFrom("P-------"),
+		shapeFrom("--P-----"),
+		shapeFrom("----P---"),
+		shapeFrom("------P-"),
+		shapeFrom("Cu------"),
+		shapeFrom("--Cu----"),
+		shapeFrom("----Cu--"),
+		shapeFrom("------Cu"),
+		shapeFrom("CuCu----"),
+		shapeFrom("--CuCu--"),
+		shapeFrom("----CuCu"),
+		shapeFrom("Cu----Cu"),
+		shapeFrom("CuCuCu--"),
+		shapeFrom("--CuCuCu"),
+		shapeFrom("Cu--CuCu"),
+		shapeFrom("CuCu--Cu"),
+		shapeFrom("CuCuCuCu"),
 	}
 
-	for _, shape := range possibleList {
-		if shape.layerCount() == 1 {
-			stackables = append(stackables, shape)
-		}
+	for _, shape := range stackables {
+		addPossible(shape, 0)
 	}
+
+	// for changed {
+	// 	changed = false
+	// 	for _, shape := range possibleList {
+	// 		addPossible(shape.rotate())
+	// 		addPossible(shape.pushPins())
+	// 		addPossible(shape.right())
+	// 	}
+
+	// 	for _, a := range possibleLeftList {
+	// 		for _, b := range possibleRightList {
+	// 			addPossible(a.combine(b))
+	// 		}
+	// 	}
+	// }
+
+	// for _, shape := range possibleList {
+	// 	if shape.layerCount() == 1 {
+	// 		stackables = append(stackables, shape)
+	// 	}
+	// }
 	slices.Sort(stackables)
 
 	changed = true
@@ -177,6 +312,7 @@ func findAllPossibleShapes() {
 			changed = false
 
 			fmt.Println("Simple...", len(possibleList))
+			slices.Sort(possibleList)
 			var wg sync.WaitGroup
 			wg.Add(len(additions))
 			for i := range additions {
@@ -186,7 +322,7 @@ func findAllPossibleShapes() {
 			fmt.Println("Merging Simple...", len(possibleList))
 			for i := range additions {
 				for _, shape := range additions[i] {
-					addPossible(shape)
+					addPossible(shape.shape, shape.original)
 				}
 			}
 		}
@@ -197,12 +333,13 @@ func findAllPossibleShapes() {
 			changed = false
 			for _, a := range possibleLeftList {
 				for _, b := range possibleRightList {
-					addPossible(a.combine(b))
+					addPossible(a.combine(b), a)
 				}
 			}
 		}
 
 		fmt.Println("Stack...", len(possibleList))
+		slices.Sort(possibleList)
 		var wg sync.WaitGroup
 		wg.Add(len(additions))
 		for i := range additions {
@@ -212,22 +349,28 @@ func findAllPossibleShapes() {
 		fmt.Println("Merging Stack...", len(possibleList))
 		for i := range additions {
 			for _, shape := range additions[i] {
-				addPossible(shape)
+				addPossible(shape.shape, shape.original)
 			}
 		}
 
 		fmt.Println("Simple (1)...", len(possibleList))
-		for _, shape := range possibleList {
-			addPossible(shape.rotate())
-			addPossible(shape.pushPins())
-			addPossible(shape.right())
-			addPossible(shape.crystalGenerator())
+		slices.Sort(possibleList)
+		wg.Add(len(additions))
+		for i := range additions {
+			go calcSimple(i, &wg)
+		}
+		wg.Wait()
+		fmt.Println("Merging Simple (1)...", len(possibleList))
+		for i := range additions {
+			for _, shape := range additions[i] {
+				addPossible(shape.shape, shape.original)
+			}
 		}
 
 		fmt.Println("Combine (1)...", len(possibleList))
 		for _, a := range possibleLeftList {
 			for _, b := range possibleRightList {
-				addPossible(a.combine(b))
+				addPossible(a.combine(b), a)
 			}
 		}
 	}
@@ -241,6 +384,15 @@ func findAllPossibleShapes() {
 	file, _ := os.Create("possible-sorted.bin")
 	defer file.Close()
 	file.Write(bytes)
+
+	slices.SortFunc(possibleRecipes, func(a, b recipe) int {
+		return int(a.shape) - int(b.shape)
+	})
+	pointer2 := unsafe.SliceData(possibleRecipes)
+	bytes = unsafe.Slice((*byte)(unsafe.Pointer(pointer2)), len(possibleRecipes)*8)
+	file2, _ := os.Create("possible-sorted-recipe.bin")
+	defer file2.Close()
+	file2.Write(bytes)
 	// file, _ := os.Create("possible.bin")
 	// defer file.Close()
 
@@ -252,13 +404,17 @@ func findAllPossibleShapes() {
 }
 
 func calcStack(index int, wg *sync.WaitGroup) {
+	max := len(stackables) / len(additions) * (index + 1)
+	if index == len(stackables)-1 {
+		max = len(stackables)
+	}
 	result := additions[index][:0]
-	for _, b := range stackables[len(stackables)/len(additions)*index : len(stackables)/len(additions)*(index+1)] {
+	for _, b := range stackables[len(stackables)/len(additions)*index : max] {
 		for _, a := range possibleList {
-			c := a.stack(b)
+			c := a.unsafeStack(b)
 			if c != a {
-				if _, ok := possible[c]; !ok {
-					result = append(result, c)
+				if !c.isPossible() {
+					result = append(result, recipe{c, a})
 				}
 			}
 		}
@@ -275,24 +431,24 @@ func calcSimple(index int, wg *sync.WaitGroup) {
 	result := additions[index][:0]
 	for _, shape := range possibleList[len(possibleList)/len(additions)*index : max] {
 		s := shape.rotate()
-		if _, ok := possible[s]; !ok {
-			result = append(result, s)
+		if !s.isPossible() {
+			result = append(result, recipe{s, shape})
 		}
 		s = shape.rotate().rotate()
-		if _, ok := possible[s]; !ok {
-			result = append(result, s)
+		if !s.isPossible() {
+			result = append(result, recipe{s, shape})
 		}
 		s = shape.pushPins()
-		if _, ok := possible[s]; !ok {
-			result = append(result, s)
+		if !s.isPossible() {
+			result = append(result, recipe{s, shape})
 		}
 		s = shape.right()
-		if _, ok := possible[s]; !ok {
-			result = append(result, s)
+		if !s.isPossible() {
+			result = append(result, recipe{s, shape})
 		}
 		s = shape.crystalGenerator()
-		if _, ok := possible[s]; !ok {
-			result = append(result, s)
+		if !s.isPossible() {
+			result = append(result, recipe{s, shape})
 		}
 	}
 	additions[index] = result

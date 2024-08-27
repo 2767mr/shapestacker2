@@ -60,11 +60,11 @@ func shapeFrom(s string) shape {
 		if !odd {
 			switch c {
 			case 'C', 'R', 'W', 'S':
-				result = result.setCornerAt(index, cornerTypeFilled)
+				result = result.setCornerAt((3-index%4)+index/4*4, cornerTypeFilled)
 			case 'P':
-				result = result.setCornerAt(index, cornerTypePin)
+				result = result.setCornerAt((3-index%4)+index/4*4, cornerTypePin)
 			case 'c':
-				result = result.setCornerAt(index, cornerTypeCrystal)
+				result = result.setCornerAt((3-index%4)+index/4*4, cornerTypeCrystal)
 			}
 			index++
 		}
@@ -206,18 +206,29 @@ func (s shape) collapse() shape {
 		return s
 	}
 
-	withoutCrystals := s
-	for i := position(0); i < 16; i++ {
-		if supported.cornerAt(i).isEmpty() {
-			withoutCrystals = withoutCrystals.destoryCrystalAt(i)
+	unsupported := s &^ supported
+	crystals := unsupported & (unsupported >> 16)
+	unsupported &^= crystals | (crystals << 16)
+
+	result := supported
+
+	for unsupported != 0 {
+		group := unsupported.firstGroup()
+		unsupported = unsupported &^ group
+
+		valid := 3
+		for i := 0; i < 4; i++ {
+			if (group.toFilled()>>(i*4))&result.toFilled() != 0 || (group>>(i*4)<<(i*4)) != group {
+				valid = i - 1
+				break
+			}
 		}
+
+		result = result | ((group & 0b1111_1111_1111_1111) >> (valid * 4))
+		result = result | ((group >> (valid * 4)) &^ 0b1111_1111_1111_1111)
 	}
 
-	mask := supported.toFilled()
-	mask = mask | mask<<16
-
-	fallen := withoutCrystals&mask | (withoutCrystals&^mask)>>4
-	return fallen.collapse()
+	return result
 }
 
 func (s shape) supported() shape {
@@ -234,16 +245,6 @@ func (s shape) supported() shape {
 	}
 
 	return supported
-}
-
-func (s shape) unsupported() shape {
-	unsupported := s &^ s.supported()
-	for i := position(0); i < 16; i++ {
-		if unsupported.cornerAt(i).isCrystal() {
-			unsupported = unsupported.setCornerAt(i, cornerTypeNone)
-		}
-	}
-	return unsupported
 }
 
 func (s shape) isSupported(position position, supported shape) bool {
@@ -279,13 +280,16 @@ func (s shape) isSupported(position position, supported shape) bool {
 }
 
 func (s shape) pushPins() shape {
+	pins := s.toFilled() & 0b1111
+
 	for i := position(12); i < 16; i++ {
 		s = s.destoryCrystalAt(i)
 	}
+	top := s & 0b1111_0000_0000_0000_1111_0000_0000_0000
+	top = top >> 12
 
-	pins := s.toFilled() & 0b1111
 	s <<= 4
-	s &^= 0b1111_0000_0000_0000
+	s &^= 0b1111_0000_0000_0000_0000
 	s |= pins << 16
 
 	return s.collapse()
@@ -304,6 +308,99 @@ func (s shape) right() shape {
 
 	right := s & 0b1100_1100_1100_1100_1100_1100_1100_1100
 	return right.collapse()
+
+	//Destory crystals
+	crystals := s & (s >> 16)
+	if crystals != 0 {
+		filled := s.toFilled()
+
+		//Directly cut crystals
+		topCrystals := ((crystals & 0b1000_1000_1000_1000) >> 3) & ((crystals & 0b0001_0001_0001_0001) >> 0)
+		topCrystals |= topCrystals << 3
+
+		bottomCrystals := ((crystals & 0b0100_0100_0100_0100) >> 1) & ((crystals & 0b0010_0010_0010_0010) >> 0)
+		bottomCrystals |= bottomCrystals << 1
+
+		cutCrystals := topCrystals | bottomCrystals
+
+		for range 7 {
+			rotated := cutCrystals.rotate()
+			counterRotated := cutCrystals.rotate().rotate().rotate()
+			above := (cutCrystals & 0b1111_1111_1111) << 4
+			below := cutCrystals >> 4
+			cutCrystals = crystals & (cutCrystals | rotated | counterRotated | above | below)
+		}
+
+		//Empty left sides
+		emptySpaces := ^filled | crystals
+		emptyLeftSides := ((emptySpaces & 0b1000_1000_1000_1000) >> 1) & ((emptySpaces & 0b0100_0100_0100_0100) >> 0)
+
+		removeCollapsedCrystals := emptyLeftSides
+
+		//Everything on the same layer
+		removeCollapsedCrystals |= removeCollapsedCrystals << 1
+		removeCollapsedCrystals |= removeCollapsedCrystals >> 2
+
+		//Layer above that
+		removeCollapsedCrystals |= removeCollapsedCrystals & 0b1111_1111_1111 << 4
+
+		//2 Layers above that
+		removeCollapsedCrystals |= removeCollapsedCrystals & 0b1111_1111 << 8
+
+		//Upper bits
+		removeCollapsedCrystals |= removeCollapsedCrystals << 16
+
+		//Only crystals
+		removeCollapsedCrystals = (crystals | (crystals << 16)) & removeCollapsedCrystals
+
+		removedCrystals := (cutCrystals | cutCrystals<<16) | removeCollapsedCrystals
+
+		s = s &^ removedCrystals
+	}
+
+	//Take right side and collapse
+	result := shape(0)
+	layer := (s >> 0) & 0b1100_0000_0000_0000_1100
+	if (layer>>16)&^layer != 0 {
+		//Has pins
+		result = layer & 0b0100_0000_0000_0000_0100
+		result = result.unsafeStack(layer & 0b1000_0000_0000_0000_1000)
+	} else if layer != 0 {
+		//No pins
+		result = layer
+	}
+
+	layer = (s >> 4) & 0b1100_0000_0000_0000_1100
+	if (layer>>16)&^layer != 0 {
+		//Has pins
+		result = result.unsafeStack(layer & 0b0100_0000_0000_0000_0100)
+		result = result.unsafeStack(layer & 0b1000_0000_0000_0000_1000)
+	} else if layer != 0 {
+		//No pins
+		result = result.unsafeStack(layer)
+	}
+
+	layer = (s >> 8) & 0b1100_0000_0000_0000_1100
+	if (layer>>16)&^layer != 0 {
+		//Has pins
+		result = result.unsafeStack(layer & 0b0100_0000_0000_0000_0100)
+		result = result.unsafeStack(layer & 0b1000_0000_0000_0000_1000)
+	} else if layer != 0 {
+		//No pins
+		result = result.unsafeStack(layer)
+	}
+
+	layer = (s >> 12) & 0b1100_0000_0000_0000_1100
+	if (layer>>16)&^layer != 0 {
+		//Has pins
+		result = result.unsafeStack(layer & 0b0100_0000_0000_0000_0100)
+		result = result.unsafeStack(layer)
+	} else if layer != 0 {
+		//No pins
+		result = result.unsafeStack(layer)
+	}
+
+	return result
 }
 
 func (s shape) combine(with shape) shape {
@@ -316,6 +413,7 @@ func (s shape) stack(other shape) shape {
 		other = other.destoryCrystalAt(i)
 	}
 
+	mask := shape(0)
 	for other != 0 {
 		group := other.firstGroup()
 		other = other &^ group
@@ -325,6 +423,11 @@ func (s shape) stack(other shape) shape {
 		}
 
 		filledGroup := group.toFilled()
+		if filledGroup&mask != 0 || (filledGroup<<12)&s.toFilled() != 0 {
+			mask |= group.toFilled()
+			continue
+		}
+
 		filledS := s.toFilled()
 
 		valid := 0
@@ -340,6 +443,28 @@ func (s shape) stack(other shape) shape {
 	}
 
 	return s
+}
+
+//unsafeStack other shape on top of s
+//The other shape must only be a single group at the bottom layer without crystals
+func (s shape) unsafeStack(other shape) shape {
+	filledS := s.toFilled()
+	filledOther := other.toFilled()
+
+	if filledS&(filledOther<<12) != 0 {
+		return s
+	}
+
+	if filledS&(filledOther<<8) != 0 {
+		return s | (other << 12)
+	}
+	if filledS&(filledOther<<4) != 0 {
+		return s | (other << 8)
+	}
+	if filledS&filledOther != 0 {
+		return s | (other << 4)
+	}
+	return s | other
 }
 
 func (s shape) firstGroup() shape {
@@ -363,7 +488,7 @@ func (s shape) connectedGroup(position position, group shape) shape {
 		return group
 	}
 
-	if group.cornerAt(position).isFilled() {
+	if group.cornerAt(position).isFilled() || group.cornerAt(position).isCrystal() {
 		return group
 	}
 
@@ -378,12 +503,6 @@ func (s shape) connectedGroup(position position, group shape) shape {
 	}
 	if s.cornerAt(position.rotate().rotate().rotate()).isFilled() {
 		group = s.connectedGroup(position.rotate().rotate().rotate(), group)
-	}
-	if s.cornerAt(position.above()).isFilled() {
-		group = s.connectedGroup(position.above(), group)
-	}
-	if s.cornerAt(position).isCrystal() && s.cornerAt(position.below()).isCrystal() {
-		group = s.connectedGroup(position.below(), group)
 	}
 	return group
 }
