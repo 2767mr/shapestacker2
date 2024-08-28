@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -46,7 +47,7 @@ var (
 		shapeFrom("CuCuCuCu"),
 	}
 
-	recipeMap = make(map[Shape]recipeNode)
+	recipeMap = make(map[Shape]RecipeNode)
 
 	changed = true
 )
@@ -72,90 +73,94 @@ type recipe struct {
 	original Shape
 }
 
-type recipeNode struct {
-	shape     Shape
-	operation string
-	original1 Shape
-	original2 Shape
+type RecipeNode struct {
+	Shape     Shape  `json:"-"`
+	Operation string `json:"operation"`
+	Original1 Shape  `json:"original1,omitempty"`
+	Original2 Shape  `json:"original2,omitempty"`
 }
 
-func makeRecipe(s Shape) recipeNode {
+func makeRecipe(s Shape) RecipeNode {
 	if s.toFilled() <= 0b1111 {
-		return recipeNode{
-			shape:     s,
-			operation: "trivial",
+		return RecipeNode{
+			Shape:     s,
+			Operation: "trivial",
 		}
 	}
 
 	if !s.topLayer().hasCrystal() {
 		bottom, top := s.unstack()
-		return recipeNode{
-			operation: "stack",
-			shape:     s,
-			original1: bottom,
-			original2: top >> ((s.layerCount() - 1) * 4),
+		return RecipeNode{
+			Operation: "stack",
+			Shape:     s,
+			Original1: bottom,
+			Original2: top >> ((s.layerCount() - 1) * 4),
 		}
 	}
 
 	if s&^0b0011_0011_0011_0011_0011_0011_0011_0011 == 0 {
-		return recipeNode{shape: s, operation: "half"}
+		return RecipeNode{Shape: s, Operation: "half"}
 	}
 
 	if s.isLeftRightValid() {
 		right := (s & 0b0011_0011_0011_0011_0011_0011_0011_0011)
 		left := (s &^ 0b0011_0011_0011_0011_0011_0011_0011_0011)
 		if left.collapse() == left && right.collapse() == right {
-			return recipeNode{shape: s, operation: "combine", original1: left, original2: right}
+			return RecipeNode{Shape: s, Operation: "combine", Original1: left, Original2: right}
 		}
 	}
 
 	if s.isUpDownValid() {
 		//rotate then do combine via isLeftRightValid
-		return recipeNode{shape: s, operation: "rotate", original1: s.rotate().rotate().rotate()}
+		return RecipeNode{Shape: s, Operation: "rotate", Original1: s.rotate().rotate().rotate()}
 	}
 
 	if !s.isMinimal() {
-		return recipeNode{shape: s, operation: "rotate", original1: s.rotate().rotate().rotate()}
+		if s.rotate().isMinimal() || s.rotate().rotate().isMinimal() || s.rotate().rotate().rotate().isMinimal() {
+			return RecipeNode{Shape: s, Operation: "rotate", Original1: s.rotate().rotate().rotate()}
+		} else {
+			return RecipeNode{Shape: s, Operation: "mirror", Original1: s.mirror()}
+		}
 	}
 
 	if s.isStackTopWithoutCrystals() {
 		bottom, top := s.unstack()
 		bottom |= top.crystals()
-		return recipeNode{
-			operation: "stack",
-			shape:     s,
-			original1: bottom,
-			original2: (top &^ bottom).removeBottomEmpty(),
+		return RecipeNode{
+			Operation: "stack",
+			Shape:     s,
+			Original1: bottom,
+			Original2: (top &^ bottom).removeBottomEmpty(),
 		}
 	}
 
 	r := s.recipe()
 	if r.original.pushPins() == s {
 		hardcodedPins[s] = r.original
-		return recipeNode{shape: s, operation: "pushPins", original1: r.original}
+		return RecipeNode{Shape: s, Operation: "pushPins", Original1: r.original}
 	}
 
 	if r.original.stack((s &^ r.original).removeBottomEmpty()) == s {
 		hardcodedStacks[s] = r.original
-		return recipeNode{shape: s, operation: "stack", original1: r.original, original2: (s &^ r.original).removeBottomEmpty()}
+		return RecipeNode{Shape: s, Operation: "stack", Original1: r.original, Original2: (s &^ r.original).removeBottomEmpty()}
 	}
 
 	if r.original.rotate() == s {
 		r2 := r.original.recipe()
 		if r2.original.rotate().pushPins() == s {
 			hardcodedPins[s] = r2.original.rotate()
-			return recipeNode{shape: s, operation: "pushPins", original1: r2.original.rotate()}
+			return RecipeNode{Shape: s, Operation: "pushPins", Original1: r2.original.rotate()}
 		}
 
 		if r2.original.rotate().stack((s &^ r2.original.rotate()).removeBottomEmpty()) == s {
 			hardcodedStacks[s] = r2.original.rotate()
-			return recipeNode{shape: s, operation: "stack", original1: r2.original.rotate(), original2: (s &^ r2.original.rotate()).removeBottomEmpty()}
+			return RecipeNode{Shape: s, Operation: "stack", Original1: r2.original.rotate(), Original2: (s &^ r2.original.rotate()).removeBottomEmpty()}
 		}
 	}
 
 	if p, ok := reversePinPush[s]; ok {
 		hardcodedPins[s] = p
-		return recipeNode{shape: s, operation: "pushPins", original1: p}
+		return RecipeNode{Shape: s, Operation: "pushPins", Original1: p}
 	}
 
 	// for i := position(16); i > 0; i-- {
@@ -167,28 +172,62 @@ func makeRecipe(s Shape) recipeNode {
 	// 	}
 	// }
 
-	return recipeNode{shape: s, operation: "unknown"}
+	return RecipeNode{Shape: s, Operation: "unknown"}
 }
 
-func (r recipeNode) check() bool {
-	switch r.operation {
+func (r RecipeNode) check() bool {
+	switch r.Operation {
 	case "unknown":
 		return false //Temporary
 	case "trivial":
-		return r.shape.isPossible() && r.shape.toFilled() <= 0b1111
+		return r.Shape.isPossible() && r.Shape.toFilled() <= 0b1111
 	case "half":
-		return r.shape.isPossible() && r.shape&^0b0011_0011_0011_0011_0011_0011_0011_0011 == 0
+		return r.Shape.isPossible() && r.Shape&^0b0011_0011_0011_0011_0011_0011_0011_0011 == 0
 	case "stack":
-		return r.original1.stack(r.original2) == r.shape && r.original1.isPossible() && r.original2.isPossible()
+		return r.Original1.stack(r.Original2) == r.Shape && r.Original1.isPossible() && r.Original2.isPossible()
 	case "rotate":
-		return r.original1.rotate() == r.shape && r.original1.isPossible()
+		return r.Original1.rotate() == r.Shape && r.Original1.isPossible()
+	case "mirror":
+		return r.Original1.mirror() == r.Shape && r.Original1.isPossible()
 	case "combine":
-		return r.original1.combine(r.original2) == r.shape && r.original1.isPossible() && r.original2.isPossible()
+		return r.Original1.combine(r.Original2) == r.Shape && r.Original1.isPossible() && r.Original2.isPossible()
 	case "pushPins":
-		return r.original1.pushPins() == r.shape && r.original1.isPossible()
+		return r.Original1.pushPins() == r.Shape && r.Original1.isPossible()
 	default:
 		return false
 	}
+}
+
+func (r RecipeNode) WriteTo(w io.Writer) error {
+	switch r.Operation {
+	case "unknown":
+		w.Write([]byte{'u'})
+	case "trivial":
+		w.Write([]byte{'t'})
+	case "half":
+		w.Write([]byte{'h'})
+	case "stack":
+		w.Write([]byte{'s'})
+	case "rotate":
+		w.Write([]byte{'r'})
+	case "combine":
+		w.Write([]byte{'c'})
+	case "pushPins":
+		w.Write([]byte{'p'})
+	default:
+		w.Write([]byte{'u'})
+	}
+
+	var b [4]byte
+	binary.LittleEndian.PutUint32(b[:], uint32(r.Shape))
+	w.Write(b[:])
+
+	binary.LittleEndian.PutUint32(b[:], uint32(r.Original1))
+	w.Write(b[:])
+
+	binary.LittleEndian.PutUint32(b[:], uint32(r.Original2))
+	_, err := w.Write(b[:])
+	return err
 }
 
 func main() {
@@ -205,12 +244,17 @@ func main() {
 	// 	}
 	// }
 
-	for _, s := range possibleList {
-		reversePinPush[s.pushPins()] = s
-		// reverseRight[s.right()] = s
-	}
+	// for _, s := range possibleList {
+	// 	reversePinPush[s.pushPins()] = s
+	// 	// reverseRight[s.right()] = s
+	// }
 
 	fmt.Println("finding recipes")
+
+	// makeRecipe(shapeFrom("cu----P-:CuCuCuP-:------cu"))
+
+	// printRecipe2(shapeFrom("----CuCu:----Cu--:----P-cr:----Cucr"))
+	// return
 
 	// printRecipe(shapeFrom("--P---P-:--Cu--cu:----CuCu:Cu--Cucu"))
 	// fmt.Println("---")
@@ -219,26 +263,71 @@ func main() {
 	// printRecipe(shapeFrom("cuCu----:CuP-----:cuCu----:cu------"))
 	// return
 
+	// var buf bytes.Buffer
+
 	count := 0
 	for _, s := range possibleList[1:] {
-		r := makeRecipe(s)
-		if !r.check() {
-			count++
-			if count < 1000 {
-				fmt.Println("Error:", s, r.operation, r.original1, r.original2, "|", r.shape.recipe().original, findRecipeFromPreloaded(s).operation)
-			}
+		if s.toFilled() > 0b1111 && s.topLayer().hasCrystal() && s&^0b0011_0011_0011_0011_0011_0011_0011_0011 == 0 {
+			findRecipeDepth(s, s, 0)
+			// mirrored := s.mirror()
+			// otherSide := mirrored &^ (mirrored.crystals() &^ 0b1111_1111_1111_1111)
+			// combined := s.combine(otherSide)
 
+			// emptySpaces := (combined.toFilled() >> 4) &^ combined.toFilled()
+			// combined |= emptySpaces | (emptySpaces << 16)
+
+			// emptySpaces = (combined.toFilled() >> 4) &^ combined.toFilled()
+			// combined |= emptySpaces | (emptySpaces << 16)
+
+			// emptySpaces = (combined.toFilled() >> 4) &^ combined.toFilled()
+			// combined |= emptySpaces | (emptySpaces << 16)
+
+			// up := combined &^ 0b0110_0110_0110_0110_0110_0110_0110_0110
+			// down := combined & 0b0110_0110_0110_0110_0110_0110_0110_0110
+			// if combined.rotate().rotate().right().rotate().rotate() == s && combined.isPossible() && up.isPossible() && down.isPossible() {
+			// 	count++
+			// } else if combined.rotate().rotate().right().rotate().rotate() == s && !(combined.isPossible() && up.isPossible() && down.isPossible()) {
+			// 	fmt.Println(s)
+			// }
+		}
+
+		// findRecipeDepth(s, s, 0)
+		// r := makeRecipe(s)
+		// r.WriteTo(&buf)
+		// if !r.check() {
+		// 	count++
+		// 	if count < 1000 {
+		// 		fmt.Println("Error:", s, r.operation, r.original1, r.original2, "|", r.shape.recipe().original, findRecipeFromPreloaded(s).operation)
+		// 	}
+
+		// }
+	}
+
+	count = 0
+	for s, r := range recipeMap {
+		if !s.topLayer().hasCrystal() && r.Operation != "stack" {
+			count++
+			_ = r
 		}
 	}
+
 	fmt.Println("Invalid recipes:", count)
 
-	fPins, _ := os.Create("hardcoded-pins.json")
-	defer fPins.Close()
-	json.NewEncoder(fPins).Encode(hardcodedPins)
+	fHalfs, _ := os.Create("hardcoded-halfs.json")
+	defer fHalfs.Close()
+	json.NewEncoder(fHalfs).Encode(recipeMap)
 
-	fStacks, _ := os.Create("hardcoded-stacks.json")
-	defer fStacks.Close()
-	json.NewEncoder(fStacks).Encode(hardcodedStacks)
+	// fRecipes, _ := os.Create("recipes.bin")
+	// defer fRecipes.Close()
+	// fRecipes.Write(buf.Bytes())
+
+	// fPins, _ := os.Create("hardcoded-pins.json")
+	// defer fPins.Close()
+	// json.NewEncoder(fPins).Encode(hardcodedPins)
+
+	// fStacks, _ := os.Create("hardcoded-stacks.json")
+	// defer fStacks.Close()
+	// json.NewEncoder(fStacks).Encode(hardcodedStacks)
 
 	return
 
@@ -372,27 +461,27 @@ func main() {
 	// findAllPossibleShapes()
 }
 
-func findRecipe(s Shape) recipeNode {
-	return findRecipeFromPreloaded(s)
-	if s.toFilled() <= 0b1111_1111_11111 {
-		return findRecipeFromPreloaded(s)
-	}
+func findRecipe(s Shape) RecipeNode {
+	// return findRecipeFromPreloaded(s)
+	// if s.toFilled() <= 0b1111_1111_11111 {
+	// 	return findRecipeFromPreloaded(s)
+	// }
 
 	if !s.topLayer().hasCrystal() {
 		b, _ := s.unstack()
-		return recipeNode{
-			operation: "stack",
-			shape:     s,
-			original1: b,
+		return RecipeNode{
+			Operation: "stack",
+			Shape:     s,
+			Original1: b,
 		}
 	}
 
 	if s.isStackTopWithoutCrystals() {
 		b, t := s.unstack()
-		return recipeNode{
-			operation: "stack",
-			shape:     s,
-			original1: b | t.crystals(),
+		return RecipeNode{
+			Operation: "stack",
+			Shape:     s,
+			Original1: b | t.crystals(),
 		}
 	}
 
@@ -400,53 +489,54 @@ func findRecipe(s Shape) recipeNode {
 		right := (s & 0b0011_0011_0011_0011_0011_0011_0011_0011).collapse()
 		left := (s &^ 0b0011_0011_0011_0011_0011_0011_0011_0011).collapse()
 		if left.isPossible() && right.isPossible() {
-			return recipeNode{
-				operation: "combine",
-				shape:     s,
-				original1: s & 0b0011_0011_0011_0011_0011_0011_0011_0011,
-				original2: s &^ 0b0011_0011_0011_0011_0011_0011_0011_0011,
+			return RecipeNode{
+				Operation: "combine",
+				Shape:     s,
+				Original1: s & 0b0011_0011_0011_0011_0011_0011_0011_0011,
+				Original2: s &^ 0b0011_0011_0011_0011_0011_0011_0011_0011,
 			}
 		}
 	}
 
 	if p, ok := reversePinPush[s]; ok {
-		return recipeNode{
-			operation: "pin",
-			shape:     s,
-			original1: p,
+		return RecipeNode{
+			Operation: "pin",
+			Shape:     s,
+			Original1: p,
 		}
 	}
 
 	if r, ok := reverseRight[s]; ok {
-		return recipeNode{
-			operation: "right",
-			shape:     s,
-			original1: r,
+		return RecipeNode{
+			Operation: "right",
+			Shape:     s,
+			Original1: r,
 		}
 	}
 
-	return recipeNode{
-		operation: "rotate",
-		shape:     s,
-		original1: s.rotate().rotate().rotate(),
+	return RecipeNode{
+		Operation: "rotate",
+		Shape:     s,
+		Original1: s.rotate().rotate().rotate(),
 	}
 }
 
 func findRecipeDepth(original Shape, s Shape, depth int) int {
-	if depth > 100 {
-		fmt.Println("Circle:", original, s)
-		return 0
-	}
 	if s == 0 {
 		return 0
 	}
-
 	if s.layerCount() == 1 {
 		return depth
 	}
 
-	r := findRecipe(s)
-	return max(findRecipeDepth(original, r.original1, depth+1), findRecipeDepth(original, r.original2, depth+1))
+	if depth > 100 {
+		fmt.Println("Circle:", original, s)
+		return 0
+	}
+
+	r := findRecipeFromPreloaded(s)
+	recipeMap[s] = r
+	return max(findRecipeDepth(original, r.Original1, depth+1), findRecipeDepth(original, r.Original2, depth+1))
 }
 
 func checkRecipeMap() {
@@ -456,19 +546,19 @@ func checkRecipeMap() {
 		for len(stack) > 0 {
 			r := recipeMap[stack[len(stack)-1]]
 
-			if r.original1.toFilled()&^0b1111 != 0 {
-				if r.original1 == s {
+			if r.Original1.toFilled()&^0b1111 != 0 {
+				if r.Original1 == s {
 					fmt.Println("Error recipe:", s)
 					return
 				}
-				stack = append(stack, r.original1)
+				stack = append(stack, r.Original1)
 			}
-			if r.original2.toFilled()&^0b1111 != 0 {
-				if r.original2 == s {
+			if r.Original2.toFilled()&^0b1111 != 0 {
+				if r.Original2 == s {
 					fmt.Println("Error recipe:", s)
 					return
 				}
-				stack = append(stack, r.original2)
+				stack = append(stack, r.Original2)
 			}
 		}
 
@@ -484,7 +574,7 @@ func findRoute(s Shape) {
 
 	r, ok := recipeMap[s]
 	if ok {
-		rStack := []recipeNode{r}
+		rStack := []RecipeNode{r}
 
 		for len(rStack) > 0 {
 			if len(rStack) > 20000 {
@@ -495,19 +585,19 @@ func findRoute(s Shape) {
 			r := rStack[len(rStack)-1]
 			rStack = rStack[:len(rStack)-1]
 
-			if r.original1.toFilled()&^0b1111 != 0 {
-				newR, ok := recipeMap[r.original1]
+			if r.Original1.toFilled()&^0b1111 != 0 {
+				newR, ok := recipeMap[r.Original1]
 				if !ok {
-					fmt.Println("No recipe:", s, r.shape)
+					fmt.Println("No recipe:", s, r.Shape)
 					return
 				}
 				rStack = append(rStack, newR)
 			}
 
-			if r.original2.toFilled()&^0b1111 != 0 {
-				newR, ok := recipeMap[r.original2]
+			if r.Original2.toFilled()&^0b1111 != 0 {
+				newR, ok := recipeMap[r.Original2]
 				if !ok {
-					fmt.Println("No recipe:", s, r.shape)
+					fmt.Println("No recipe:", s, r.Shape)
 					return
 				}
 				rStack = append(rStack, newR)
@@ -581,13 +671,16 @@ func fillRecipe(s Shape) {
 	result := findRecipeFromPreloaded(s)
 	recipeMap[s] = result
 
-	fillRecipe(result.original1)
-	fillRecipe(result.original2)
+	fillRecipe(result.Original1)
+	fillRecipe(result.Original2)
 }
 
-func findRecipeFromPreloaded(s Shape) recipeNode {
-	if _, ok := recipeMap[s]; ok || s == 0 {
-		return recipeNode{operation: "unknown", shape: s}
+func findRecipeFromPreloaded(s Shape) RecipeNode {
+	if s == 0 {
+		return RecipeNode{Operation: "trivial", Shape: s}
+	}
+	if r, ok := recipeMap[s]; ok {
+		return r
 	}
 
 	i, _ := slices.BinarySearchFunc(possibleRecipes, s, func(a recipe, b Shape) int {
@@ -596,7 +689,7 @@ func findRecipeFromPreloaded(s Shape) recipeNode {
 
 	r := possibleRecipes[i]
 
-	result := recipeNode{shape: s, original1: r.original}
+	result := RecipeNode{Shape: s, Original1: r.original}
 
 	op := "unknown"
 	if r.original.rotate() == s {
@@ -613,7 +706,7 @@ func findRecipeFromPreloaded(s Shape) recipeNode {
 		for _, stackable := range stackables {
 			if r.original.stack(stackable) == s {
 				op = "stack"
-				result.original2 = stackable
+				result.Original2 = stackable
 				break
 			}
 		}
@@ -621,22 +714,31 @@ func findRecipeFromPreloaded(s Shape) recipeNode {
 		if op == "unknown" {
 			if r.original&0b1100_1100_1100_1100_1100_1100_1100_1100 == 0 && (s & 0b1100_1100_1100_1100_1100_1100_1100_1100).isPossible() && (s&0b1100_1100_1100_1100_1100_1100_1100_1100) != 0 {
 				op = "combine"
-				result.original2 = s & 0b1100_1100_1100_1100_1100_1100_1100_1100
+				result.Original2 = s & 0b1100_1100_1100_1100_1100_1100_1100_1100
 
 			} else if r.original&^0b1100_1100_1100_1100_1100_1100_1100_1100 == 0 && (s &^ 0b1100_1100_1100_1100_1100_1100_1100_1100).isPossible() && (s&^0b1100_1100_1100_1100_1100_1100_1100_1100) != 0 {
 				op = "combine"
-				result.original2 = s &^ 0b1100_1100_1100_1100_1100_1100_1100_1100
+				result.Original2 = s &^ 0b1100_1100_1100_1100_1100_1100_1100_1100
 			}
 		}
 	}
 
 	if op == "unknown" {
 		fmt.Println("Unknown operation:", s)
-		return recipeNode{operation: "unknown", shape: s}
+		return RecipeNode{Operation: "unknown", Shape: s}
 	}
 
-	result.operation = op
+	result.Operation = op
 	return result
+}
+
+func printRecipe2(s Shape) {
+	r := makeRecipe(s)
+	for r.Operation != "unknown" && r.Operation != "trivial" && r.Operation != "half" {
+		fmt.Println("Recipe:", r.Shape, "<-", r.Original1, r.Original2, r.Operation)
+		r = makeRecipe(r.Original1)
+	}
+	fmt.Println("Recipe:", r.Shape, "<-", r.Original1, r.Original2, r.Operation)
 }
 
 func printRecipe(s Shape) {

@@ -3,6 +3,7 @@
     "version": "1.0.0",
     "description": "Solver for the game shapez2",
     "devDependencies": {
+        "@types/node": "^22.5.1",
         "esbuild": "^0.23.1",
         "typescript": "^5.5.4"
     }
