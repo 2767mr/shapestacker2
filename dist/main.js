@@ -13,6 +13,9 @@ async function main() {
       if (recipe.operation == "mirror") {
         return printRecipe2(mirror(shape2), level, !mirrored);
       }
+      if (mirrored && recipe.operation == "right") {
+        recipe.operation = "left";
+      }
       function printShape(s) {
         return toString(mirrored ? mirror(s) : s);
       }
