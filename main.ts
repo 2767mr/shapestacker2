@@ -1,7 +1,7 @@
 export { };
-const hardcodedPins = load('./hardcoded-pins.json');
-const hardcodedStacks = load('./hardcoded-stacks.json');
-const hardcodedRecipes = load('./hardcoded-halfs.json')
+const hardcodedPins = load('https://github.com/2767mr/shapestacker2/releases/download/v0.1.0/hardcoded-pins.json');
+const hardcodedStacks = load('https://github.com/2767mr/shapestacker2/releases/download/v0.1.0/hardcoded-stacks.json');
+const hardcodedRecipes = load('https://github.com/2767mr/shapestacker2/releases/download/v0.1.0/hardcoded-halfs.json')
     .then((recipes: Record<string, Omit<Recipe, 'shape'>>) =>
         Object.fromEntries(Object.entries(recipes)
             .map(([shape, recipe]) => [shape, { shape: +shape, ...recipe } as Recipe]))

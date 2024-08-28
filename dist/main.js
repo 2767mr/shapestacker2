@@ -1,7 +1,7 @@
 // main.ts
-var hardcodedPins = load("./hardcoded-pins.json");
-var hardcodedStacks = load("./hardcoded-stacks.json");
-var hardcodedRecipes = load("./hardcoded-halfs.json").then(
+var hardcodedPins = load("https://github.com/2767mr/shapestacker2/releases/download/v0.1.0/hardcoded-pins.json");
+var hardcodedStacks = load("https://github.com/2767mr/shapestacker2/releases/download/v0.1.0/hardcoded-stacks.json");
+var hardcodedRecipes = load("https://github.com/2767mr/shapestacker2/releases/download/v0.1.0/hardcoded-halfs.json").then(
   (recipes) => Object.fromEntries(Object.entries(recipes).map(([shape, recipe]) => [shape, { shape: +shape, ...recipe }]))
 );
 async function main() {
