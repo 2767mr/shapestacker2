@@ -5,7 +5,8 @@ import { Shape } from "./shape";
 async function main() {
     Object.assign(globalThis, { solve });
 
-    solve('----CgCb:----Cy--:----P-cr:----Cwcm')
+    // solve('----CgCb:----Cy--:----P-cr:----Cwcm')
+    solve('--cu--Cu:CucuCucu:--cucu--:----cu--')
 
 
     // printRecipe(parseShape('----CuCu:----Cu--:----P-cr:----Cucr'), 0)
@@ -32,7 +33,7 @@ async function solve(shape: string) {
         function printShape(s: Shape, color: string) {
             s = mirrored ? s.mirror() : s;
             drawQueue.push(s);
-            return `<span style="color:${color}">${s}</span> <svg class="shape-${s.toString().replaceAll(':', '_')}" viewBox="0 0 100 100" style="width: 64px; height: 64px" xmlns="http://www.w3.org/2000/svg"></svg>`;
+            return `<span style="color:${color}">${s}</span> <svg class="shape-${s.toString().replaceAll(':', '_').replaceAll('c', 'A')}" viewBox="0 0 100 100" style="width: 64px; height: 64px" xmlns="http://www.w3.org/2000/svg"></svg>`;
         }
 
         result += '<div style="display: flex; flex-direction: row; place-items: center; gap: 1em; margin-top: 4px">' + '&nbsp;&nbsp;&nbsp;&nbsp;'.repeat(level);
@@ -70,7 +71,7 @@ async function solve(shape: string) {
 
 
     for (const shape of drawQueue) {
-        for (const target of document.getElementsByClassName('shape-' + shape.toString().replaceAll(':', '_'))) {
+        for (const target of document.getElementsByClassName('shape-' + shape.toString().replaceAll(':', '_').replaceAll('c', 'A'))) {
             render(shape, target as HTMLElement)
         }
     }
