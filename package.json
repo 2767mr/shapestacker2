@@ -2,6 +2,10 @@
     "name": "shapez2-solver",
     "version": "1.0.0",
     "description": "Solver for the game shapez2",
+    "scripts": {
+        "start": "esbuild --bundle --minify --outdir=dist --platform=browser --sourcemap --watch --servedir=. src/main.ts",
+        "serve": "esbuild --servedir=."
+    },
     "devDependencies": {
         "@types/node": "^22.5.1",
         "esbuild": "^0.23.1",
